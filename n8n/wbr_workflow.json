@@ -1,0 +1,236 @@
+{
+  "name": "Weekly Business Review autopilot",
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Every Monday 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-opportunities",
+      "name": "Read Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Opportunities"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "read-reps",
+      "name": "Read Reps",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Reps"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "metrics",
+      "name": "Compute WBR metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Same metric logic as apps_script/WBR.gs (data-quality checks first, then coverage and forecast).\nconst STAGE_PROB = { 'Prospecting': 0.1, 'Discovery': 0.2, 'Solution Fit': 0.4, 'Proposal': 0.6, 'Negotiation': 0.8 };\n\n/** Pure function: CRM rows in, WBR metrics out. Kept free of Sheets calls so it can be tested in Node. */\nfunction computeWbr(opps, reps, todayIso) {\n  const today = new Date(todayIso + 'T00:00:00Z');\n  const q = Math.floor(today.getUTCMonth() / 3);\n  const qStart = new Date(Date.UTC(today.getUTCFullYear(), q * 3, 1));\n  const qEnd = new Date(Date.UTC(today.getUTCFullYear(), q * 3 + 3, 0));\n  const d = s => new Date(s + 'T00:00:00Z');\n  const daysSince = s => (today - d(s)) / 86400000;\n\n  // Data quality first: duplicates, missing amounts, past close dates, stale deals.\n  const seen = new Set();\n  const dq = { duplicates: 0, missingAmount: 0, pastCloseDate: 0, stale30d: 0 };\n  const clean = [];\n  for (const o of opps) {\n    const key = [o.account_id, o.owner_id, o.amount, o.created_date].join('|');\n    if (seen.has(key)) { dq.duplicates++; continue; }\n    seen.add(key);\n    if (o.amount === '' || o.amount === null || o.amount === undefined) { dq.missingAmount++; continue; }\n    const open = !String(o.stage).startsWith('Closed');\n    if (open && d(o.close_date) < today) dq.pastCloseDate++;\n    if (open && daysSince(o.last_activity_date) > 30) dq.stale30d++;\n    clean.push({ ...o, amount: Number(o.amount), open });\n  }\n\n  const repById = Object.fromEntries(reps.map(r => [r.rep_id, r]));\n  const seg = {};\n  for (const r of reps) {\n    seg[r.segment] = seg[r.segment] || { quota: 0, booked: 0, open: 0, commit: 0, weighted: 0 };\n    seg[r.segment].quota += Number(r.quarterly_quota);\n  }\n  const bookedByRep = {};\n  for (const o of clean) {\n    const s = seg[(repById[o.owner_id] || {}).segment];\n    if (!s) continue;\n    const close = d(o.close_date);\n    if (o.stage === 'Closed Won' && close >= qStart && close <= today) {\n      s.booked += o.amount;\n      bookedByRep[o.owner_id] = (bookedByRep[o.owner_id] || 0) + o.amount;\n    } else if (o.open && close >= today && close <= qEnd) {\n      s.open += o.amount;\n      s.weighted += o.amount * (STAGE_PROB[o.stage] || 0);\n      if (o.forecast_category === 'Commit') s.commit += o.amount;\n    }\n  }\n\n  const segments = Object.entries(seg).map(([name, s]) => ({\n    segment: name, quota: s.quota, booked_qtd: s.booked, remaining_quota: s.quota - s.booked,\n    open_pipeline: s.open,\n    coverage_x: s.quota - s.booked > 0 ? Math.round(100 * s.open / (s.quota - s.booked)) / 100 : null,\n    forecast_commit: s.booked + s.commit, forecast_weighted: Math.round(s.booked + s.weighted),\n  }));\n  const repsAtRisk = reps\n    .map(r => ({ rep: r.rep_name, segment: r.segment, attainment_pct: Math.round(1000 * (bookedByRep[r.rep_id] || 0) / r.quarterly_quota) / 10 }))\n    .sort((a, b) => a.attainment_pct - b.attainment_pct).slice(0, 5);\n\n  return { today: todayIso, quarter: [qStart.toISOString().slice(0, 10), qEnd.toISOString().slice(0, 10)], dataQuality: dq, segments, repsAtRisk };\n}\n\nconst opps = $('Read Opportunities').all().map(i => i.json);\nconst reps = $('Read Reps').all().map(i => i.json);\nconst wbr = computeWbr(opps, reps, $now.toFormat('yyyy-MM-dd'));\n\nconst prompt = 'You are a revenue operations analyst. Write exactly five bullets for the VP of Sales from this weekly ' +\n  'business review data: where the quarter lands, the biggest risk, who needs attention, the data-quality fix ' +\n  'to make first, and one recommendation. Use the numbers.\\n\\n' + JSON.stringify(wbr);\n\nreturn [{ json: { wbr, request_body: {\n  model: 'meta-llama/Llama-3.1-8B-Instruct:fastest', max_tokens: 800, temperature: 0.2,\n  messages: [{ role: 'user', content: prompt }],\n} } }];"
+      }
+    },
+    {
+      "id": "llm",
+      "name": "LLM summary (Hugging Face)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request_body) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Hugging Face token (header Authorization: Bearer hf_...)"
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "name": "Build email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Use the LLM summary if the call worked; otherwise send a rule-based one so the review still goes out.\nconst wbr = $('Compute WBR metrics').first().json.wbr;\nconst res = $input.first().json;\nlet text = '';\nif (res && Array.isArray(res.choices) && res.choices[0] && res.choices[0].message) {\n  text = String(res.choices[0].message.content || '').trim();\n}\nconst source = text ? 'Hugging Face LLM' : 'rule-based fallback';\nif (!text) {\n  text = wbr.segments.map(s => `- ${s.segment}: ${s.coverage_x}x coverage, commit forecast ${Math.round(s.forecast_commit)} vs quota ${s.quota}`).join('\\n');\n  const dq = Object.entries(wbr.dataQuality).sort((a, b) => b[1] - a[1])[0];\n  text += `\\n- Data quality: fix ${dq[0]} first (${dq[1]} records).`;\n}\nconst table = wbr.segments.map(s => `${s.segment}: quota ${s.quota}, booked ${s.booked_qtd}, open ${s.open_pipeline}, coverage ${s.coverage_x}x`).join('\\n');\nreturn [{ json: { subject: 'Weekly Business Review ' + wbr.today, body: `${text}\\n\\n${table}\\n\\nSummary source: ${source}` } }];"
+      }
+    },
+    {
+      "id": "gmail",
+      "name": "Email sales leadership",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "sendTo": "PASTE_RECIPIENT_EMAIL",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Monday 8am": {
+      "main": [
+        [
+          {
+            "node": "Read Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Read Reps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Reps": {
+      "main": [
+        [
+          {
+            "node": "Compute WBR metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute WBR metrics": {
+      "main": [
+        [
+          {
+            "node": "LLM summary (Hugging Face)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM summary (Hugging Face)": {
+      "main": [
+        [
+          {
+            "node": "Build email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build email": {
+      "main": [
+        [
+          {
+            "node": "Email sales leadership",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

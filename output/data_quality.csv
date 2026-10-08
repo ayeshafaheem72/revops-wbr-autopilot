@@ -1,0 +1,5 @@
+issue,records,action
+Open deal with close date in the past,110,Owner to update close date or close out
+Open deal with no activity in 30+ days,60,Flag in rep 1:1s; likely forecast risk
+Missing amount,40,Excluded from pipeline; owner to add amount
+Duplicate opportunities,15,Excluded from all metrics; merge in CRM

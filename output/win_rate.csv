@@ -1,0 +1,13 @@
+segment,lead_source,closed_deals,win_rate_pct,avg_won_deal
+Enterprise,Event,183,30.6,243189.0
+Enterprise,Partner,195,30.3,246497.0
+Enterprise,Outbound,186,29.0,235702.0
+Enterprise,Inbound,204,27.0,247489.0
+Mid-Market,Partner,206,33.5,56114.0
+Mid-Market,Event,192,32.3,56074.0
+Mid-Market,Outbound,207,29.0,52992.0
+Mid-Market,Inbound,203,24.6,52500.0
+SMB,Outbound,207,31.4,14494.0
+SMB,Partner,203,28.1,13695.0
+SMB,Event,222,27.9,15098.0
+SMB,Inbound,211,26.1,13956.0

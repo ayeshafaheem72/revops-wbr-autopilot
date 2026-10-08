@@ -1,0 +1,25 @@
+rep_id,rep_name,segment,territory,quarterly_quota
+R001,Daniel Ahmed,SMB,West,180000
+R002,Ali Shah,Mid-Market,Central,600000
+R003,Hina Iqbal,Enterprise,East,2000000
+R004,Omar Ahmed,SMB,Canada,180000
+R005,Daniel Ahmed,Mid-Market,West,600000
+R006,Noor Lopez,Enterprise,Central,2000000
+R007,Ali Khan,SMB,East,180000
+R008,Sara Iqbal,Mid-Market,Canada,600000
+R009,Hina Khan,Enterprise,West,2000000
+R010,Hamza Iqbal,SMB,Central,180000
+R011,Grace Lopez,Mid-Market,East,600000
+R012,Hina Chen,Enterprise,Canada,2000000
+R013,Noor Shah,SMB,West,180000
+R014,Ali Malik,Mid-Market,Central,600000
+R015,Grace Lopez,Enterprise,East,2000000
+R016,Zara Shah,SMB,Canada,180000
+R017,Omar Iqbal,Mid-Market,West,600000
+R018,Zara Ahmed,Enterprise,Central,2000000
+R019,Sara Lopez,SMB,East,180000
+R020,Sara Rehman,Mid-Market,Canada,600000
+R021,Zara Shah,Enterprise,West,2000000
+R022,Ali Chen,SMB,Central,180000
+R023,Hamza Ahmed,Mid-Market,East,600000
+R024,Usman Ahmed,Enterprise,Canada,2000000
